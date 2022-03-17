@@ -5,11 +5,10 @@ import org.slf4j.Logger;
 
 import java.io.DataOutputStream;
 import java.io.FileOutputStream;
-import java.util.List;
-import java.util.concurrent.Future;
-import java.util.concurrent.Phaser;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
-import static java.lang.Runtime.getRuntime;
 import static java.lang.Thread.currentThread;
 import static org.slf4j.LoggerFactory.getLogger;
 
@@ -17,11 +16,13 @@ public class FileWriter
         implements Runnable {
     private static final Logger logger = getLogger(FileWriter.class);
 
-    public static final int CHUNK_SIZE = 2 * getRuntime().availableProcessors();
-
     private Pair<String, Integer> future;
 
-    //Phaser phaser = new Phaser(1);
+    private Lock lock = new ReentrantLock();
+
+    private Condition isEmpty = lock.newCondition();
+
+    private Condition isNotEmpty = lock.newCondition();
 
     private boolean shutdown = false;
 
@@ -43,13 +44,15 @@ public class FileWriter
                     new FileOutputStream(resultFile, true));
 
             while (!shutdown) {
-                synchronized (this) {
-                    if (future != null) {
-                        os.writeBytes(future.getKey() + " " + future.getValue() + "\n");
-                        future = null;
-                        this.notifyAll();
-                    }
+                lock.lock();
+                if (future != null) {
+                    os.writeBytes(future.getKey() + " " + future.getValue() + "\n");
+                    future = null;
+                    isNotEmpty.signalAll();
+                } else {
+                    isEmpty.await();
                 }
+                lock.unlock();
             }
 
             os.flush();
@@ -64,19 +67,23 @@ public class FileWriter
     }
 
     public void setFuture(Pair<String, Integer> future) {
-        synchronized (this) {
-            if(this.future != null) {
-                try {
-                    this.wait();
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                }
+        lock.lock();
+        isEmpty.signal();
+        if (this.future != null) {
+            try {
+                isNotEmpty.await();
+            } catch (InterruptedException e) {
+                e.printStackTrace();
             }
-            this.future = future;
         }
+        this.future = future;
+        lock.unlock();
     }
 
-    private void shutdown() {
+    public void shutdown() {
+        lock.lock();
+        isEmpty.signalAll();
         shutdown = true;
+        lock.unlock();
     }
 }

@@ -5,6 +5,7 @@ import org.apache.commons.lang3.tuple.Pair;
 import org.slf4j.Logger;
 
 import javax.annotation.Nonnull;
+import java.util.Optional;
 import java.util.Random;
 
 import static java.lang.System.currentTimeMillis;
@@ -23,8 +24,8 @@ public class LineCounterProcessor
     @Override
     public Pair<String, Integer> process(@Nonnull String line) {
         randomSleep();
-        // TODO: NotImplemented: подсчет кол-ва символов в строке + произвольная задержка randomSleep()
-        Pair<String, Integer> pair = new ImmutablePair<>(line, line.replaceAll("[ \n\\s]","").toCharArray().length);
+
+        Pair<String, Integer> pair = new ImmutablePair<>(line, Optional.ofNullable(line).map(s -> s.toCharArray().length).orElse(0));
         return pair;
     }
 

@@ -6,10 +6,11 @@ import org.slf4j.Logger;
 import javax.annotation.Nonnull;
 import java.io.File;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Scanner;
-import java.util.concurrent.*;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.stream.Stream;
 
 import static java.lang.Runtime.getRuntime;
@@ -28,24 +29,20 @@ public class FileProcessor {
         Thread writerThread = new Thread(fileWriter);
         writerThread.start();
 
-        // TODO: NotImplemented: запускаем FileWriter в отдельном потоке
         ExecutorService executor = Executors.newFixedThreadPool(CHUNK_SIZE);
-        //List<String> linesList = new ArrayList<>(CHUNK_SIZE);
-        List<Future<Pair<String, Integer>>> futures = new ArrayList<>(CHUNK_SIZE);
         try (final Scanner scanner = new Scanner(file, defaultCharset())) {
             while (scanner.hasNext()) {
 
                 Stream<Callable<Pair<String, Integer>>> threadStream = Stream.generate(() -> {
-                            if(scanner.hasNextLine()) {
-                                String line = scanner.nextLine();
-                                //linesList.add(line);
-                                Callable<Pair<String, Integer>> lineThread = new LineProcessorThread(line);
-                                return lineThread;
-                            }
-                            return null;
-                        });
+                    if (scanner.hasNextLine()) {
+                        String line = scanner.nextLine();
+                        Callable<Pair<String, Integer>> lineThread = new LineProcessorThread(line);
+                        return lineThread;
+                    }
+                    return null; // TODO fixmy
+                });
 
-                threadStream.limit(CHUNK_SIZE).forEach(t -> {
+                threadStream.limit(CHUNK_SIZE).filter(t -> t!=null).forEach(t -> {
                     try {
                         fileWriter.setFuture(executor.submit(t).get());
                     } catch (InterruptedException e) {
@@ -55,27 +52,16 @@ public class FileProcessor {
                     }
                 });
 
-                executor.shutdown();
-                while (!executor.isTerminated()) {
-                }
-                System.out.println("Потоки закончили работу");
-
-
-               // executor.
-                // TODO: NotImplemented: вычитываем CHUNK_SIZE строк для параллельной обработки
-
-                // TODO: NotImplemented: обрабатывать строку с помощью LineProcessor. Каждый поток обрабатывает свою строку.
-
-                // TODO: NotImplemented: добавить обработанные данные в результирующий файл
-
-
             }
         } catch (IOException exception) {
             logger.error("", exception);
             executor.shutdown();
+            fileWriter.shutdown();
+        } finally {
+            executor.shutdown();
+            fileWriter.shutdown();
+            logger.info("Потоки закончили работу");
         }
-
-        // TODO: NotImplemented: остановить поток writerThread
 
         logger.info("Finish main thread {}", Thread.currentThread().getName());
     }
