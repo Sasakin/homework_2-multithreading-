@@ -25,7 +25,7 @@ public class LineCounterProcessor
     public Pair<String, Integer> process(@Nonnull String line) {
         randomSleep();
 
-        Pair<String, Integer> pair = new ImmutablePair<>(line, Optional.ofNullable(line).map(s -> s.toCharArray().length).orElse(0));
+        Pair<String, Integer> pair = new ImmutablePair<>(line, Optional.ofNullable(line).map(s -> s.length()).orElse(0));
         return pair;
     }
 
