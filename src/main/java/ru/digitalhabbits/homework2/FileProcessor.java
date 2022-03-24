@@ -4,7 +4,9 @@ import org.apache.commons.lang3.tuple.Pair;
 import org.slf4j.Logger;
 
 import javax.annotation.Nonnull;
+import java.io.BufferedOutputStream;
 import java.io.File;
+import java.io.FileOutputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Scanner;
@@ -19,61 +21,50 @@ public class FileProcessor {
     private static final Logger logger = getLogger(FileProcessor.class);
     public static final int CHUNK_SIZE = 2 * getRuntime().availableProcessors();
 
-    Semaphore semaphore = new Semaphore(-CHUNK_SIZE + 1);
-
     public void process(@Nonnull String processingFileName, @Nonnull String resultFileName) {
         long millisec = System.currentTimeMillis();
 
         checkFileExists(processingFileName);
 
         final File file = new File(processingFileName);
-        FileWriter fileWriter = new FileWriter(resultFileName, semaphore);
-        Thread writerThread = new Thread(fileWriter);
+        FileWriter fileWriter = new FileWriter();
 
         ExecutorService executor = Executors.newFixedThreadPool(CHUNK_SIZE);
-        List<Callable<Pair<String, Integer>>> threadList = new ArrayList<>();
         List<Future<Pair<String, Integer>>> futureList = new ArrayList<>();
-        try (final Scanner scanner = new Scanner(file, defaultCharset())) {
+        try (final Scanner scanner = new Scanner(file, defaultCharset());
+             final BufferedOutputStream bufferedOutputStream = new BufferedOutputStream(
+                     new FileOutputStream(resultFileName, true))) {
+            logger.info("Перед while");
             while (scanner.hasNext()) {
+                logger.info("После while");
+                String line = scanner.nextLine();
 
-                while (threadList.size() < CHUNK_SIZE && scanner.hasNextLine()) {
-                    String line = scanner.nextLine();
-                    Callable<Pair<String, Integer>> lineThread = new LineProcessorThread(line, semaphore);
-                    threadList.add(lineThread);
-                }
-
-                threadList.forEach(t -> {
-                    try {
-                        futureList.add(executor.submit(t));
-                    } catch (Throwable e) {
-                        logger.error("", e);
-                    }
-                });
-
-                semaphore.acquire(1);
-
-                fileWriter.setFuture(futureList.stream().map(f -> {
-                    try {
-                        return f.get();
-                    } catch (Throwable e) {
-                        e.printStackTrace();
-                    }
-                    return null;
-                }).collect(Collectors.toList()));
-
-
-                executor.submit(writerThread);
-
-                semaphore.acquire(1);
-
-                threadList.clear();
-                futureList.clear();
-
+                Callable<Pair<String, Integer>> lineThread = new LineProcessorThread(line);
+                futureList.add(executor.submit(lineThread));
             }
+
+            logger.info("Перед await");
+            executor.shutdown();
+            executor.awaitTermination(2, TimeUnit.MINUTES);
+
+            logger.info("После await");
+
+            List<Pair<String, Integer>> pairsList = futureList.stream().map(f -> {
+                try {
+                    return f.get();
+                } catch (Throwable e) {
+                    logger.error("Ошибка расчета: ", e);
+                    throw new RuntimeException("Ошибка расчета", e);
+                }
+            }).collect(Collectors.toList());
+
+            fileWriter.write(pairsList, bufferedOutputStream);
+
+            futureList.clear();
+
         } catch (Throwable exception) {
             logger.error("", exception);
         } finally {
-            executor.shutdown();
             logger.info("Потоки закончили работу");
         }
 
